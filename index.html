@@ -1485,14 +1485,91 @@ async function downloadDoc(k,fmt){
     if(!dl){var bl=(data instanceof Blob)?data:new Blob([data],{type:'text/plain'}),a=document.createElement('a');a.href=URL.createObjectURL(bl);a.download=file+'.'+fmt;document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},1500);setMsg(D.name+' downloaded as '+fmt.toUpperCase()+'.');return;}
     await dl.save({filename:file+'.'+fmt,data:data});setMsg(D.name+' offered as '+fmt.toUpperCase()+'.');
   }catch(e){setMsg(e&&e.code==='declined'?'Download cancelled.':'Could not create the file: '+((e&&e.message)||'unknown error'));}}
+function card3(){return '<div class="box"><h3>Solution design diagram</h3><p class="sub" style="margin-bottom:10px">Sources, bronze, silver, gold, consumers and platform, drawn from the intake. Import into Lucid, draw.io or Visio.</p><div class="row"><button type="button" class="btn" data-act="design" data-fmt="vsdx">Visio (.vsdx)</button><button type="button" class="btn" data-act="design" data-fmt="drawio">draw.io</button></div></div>';}
 function mDocs(){
   var gaps=gapsList();
   function card(k,desc){var D=DOCS[k];return '<div class="box"><h3>'+D.name+'</h3><p class="sub" style="margin-bottom:10px">'+desc+'</p><div class="row"><button type="button" class="btn" data-act="doc" data-doc="'+k+'" data-fmt="docx">Word</button><button type="button" class="btn" data-act="doc" data-doc="'+k+'" data-fmt="pdf">PDF</button><button type="button" class="btn ghost" data-act="doc" data-doc="'+k+'" data-fmt="md">Markdown</button><button type="button" class="btn ghost" data-act="doc-prev" data-doc="'+k+'"'+(UI.doc===k?' aria-pressed="true"':'')+'>Preview</button></div></div>';}
-  return panel('Documents','Three documents are generated from the intake. Regenerate any time as answers change.','',
-   '<div class="docs">'+card('sow','Scope, deliverables, timeline, assumptions, risks, acceptance and sign-off. Commercials are left to be confirmed.')+card('brd','What the client needs, in business terms: objectives, current state, sources and spend, source decision, architecture, requirements, risks and sign-off.')+card('blrd','What the developers build: per-source ingestion specs, layer specs, survivorship, endpoints, access, non-functional needs and a backlog with acceptance criteria.')+'</div>'+
+  return panel('Documents','Three documents and a solution design diagram are generated from the intake. Regenerate any time as answers change.','',
+   '<div class="docs">'+card('sow','Scope, deliverables, timeline, assumptions, risks, acceptance and sign-off. Commercials are left to be confirmed.')+card('brd','What the client needs, in business terms: objectives, current state, sources and spend, source decision, architecture, requirements, risks and sign-off.')+card('blrd','What the developers build: per-source ingestion specs, layer specs, survivorship, endpoints, access, non-functional needs and a backlog with acceptance criteria.')+card3()+'</div>'+
    '<p class="foot" id="docmsg" style="margin-top:10px" aria-live="polite"></p>'+
    (gaps.length?'<h3>Not yet captured ('+gaps.length+')</h3><p class="hint">These appear as "Not captured" in the documents.</p><ul class="plain gaps" style="max-height:140px">'+gaps.map(function(g){return '<li>'+esc(g)+'</li>';}).join('')+'</ul>':'<p class="hint" style="margin-top:10px">Everything required is captured.</p>')+
    '<h3>Preview: '+DOCS[UI.doc].name+'</h3><div class="paper" id="paper">'+blocksHtml(docBlocks(UI.doc))+'</div><details style="margin-top:12px"><summary>Raw intake data (JSON)</summary><textarea class="json" id="json" rows="8" readonly></textarea></details>');}
+
+/* ---------- solution design export (draw.io and Visio) ---------- */
+function solModel(){
+  var N=[],E=[],id=0,add=function(o){o.id='n'+(++id);N.push(o);return o;};
+  var src=S.sources.filter(function(s){return s.name.trim();});
+  var gp=S.medallion.gold.products,ml=S.ml.cases||[];
+  var rowH=88,top=70;
+  var colX={s:40,b:340,si:580,g:820,o:1130},W={s:230,b:190,si:190,g:240,o:250};
+  var nSrc=Math.max(src.length,1),nGold=Math.max(gp.length,1);
+  var outs=[{t:'Serving endpoints',d:'Gold data products exposed to consumers'}];
+  ml.forEach(function(c){outs.push({t:'ML: '+(c.name||'Use case'),d:(c.type||'')+(c.serving?', '+c.serving.toLowerCase():'')});});
+  var rows=Math.max(nSrc,nGold,outs.length);
+  var H=top+rows*rowH+190,Wd=colX.o+W.o+40;
+  var cy=function(n,i,total){var span=rows*rowH;var off=(span-total*rowH)/2;return top+off+i*rowH;};
+  var hd=function(x,w,t){add({kind:'head',x:x,y:20,w:w,h:34,title:t,body:''});};
+  hd(colX.s,W.s,'Sources');hd(colX.b,W.b,'Bronze');hd(colX.si,W.si,'Silver');hd(colX.g,W.g,'Gold');hd(colX.o,W.o,'Consumers');
+  var bz=S.medallion.bronze,sv=S.medallion.silver;
+  var bB=add({kind:'bronze',x:colX.b,y:top+(rows*rowH-150)/2,w:W.b,h:150,title:'Bronze: raw',body:(bz.format||'Format to confirm')+'\nRetention: '+(bz.retention||'to confirm')});
+  var bS=add({kind:'silver',x:colX.si,y:top+(rows*rowH-150)/2,w:W.si,h:150,title:'Silver: conformed',body:sv.steps.length+' steps, '+sv.entities.length+' entities\nDedupe: '+(sv.dedupe||'to confirm')});
+  var srcN=src.map(function(s,i){
+    var modes=s.modes.map(function(m){return MODE_LABEL[m];}).join(', ')||'Mode to confirm';
+    var n=add({kind:'source',x:colX.s,y:cy(0,i,nSrc)+4,w:W.s,h:rowH-16,title:s.name,body:(s.cat||'No category')+'\n'+modes});
+    E.push({from:n.id,to:bB.id,label:s.modes.length===1&&s.modes[0]==='manual'?'manual':'',dash:s.modes.indexOf('manual')>-1});return n;});
+  if(!src.length)E.push({from:bB.id,to:bB.id,label:''}),E.pop();
+  E.push({from:bB.id,to:bS.id,label:''});
+  var gN=(gp.length?gp:[{name:'Gold data products',grain:''}]).map(function(g,i){
+    var n=add({kind:'gold',x:colX.g,y:cy(0,i,nGold)+4,w:W.g,h:rowH-16,title:g.name||'Gold product',body:(g.grain||'')+(g.refresh?'\nRefresh: '+g.refresh:'')});
+    E.push({from:bS.id,to:n.id,label:''});return n;});
+  var oN=outs.map(function(o,i){var n=add({kind:'out',x:colX.o,y:cy(0,i,outs.length)+4,w:W.o,h:rowH-16,title:o.t,body:o.d});
+    if(i===0)gN.forEach(function(g){E.push({from:g.id,to:n.id,label:''});});else E.push({from:gN[0].id,to:n.id,label:''});return n;});
+  var gv=S.govern;
+  var infra='Platform: '+(gv.platform||'to confirm')+'   |   Orchestration: '+(gv.orch||'to confirm')+'   |   Environments: '+(gv.envs.join(', ')||'to confirm')+'\nResidency: '+(gv.residency||'to confirm')+'   |   Security: '+(gv.security.join(', ')||'to confirm')+'\nMonitoring: '+(gv.mon.join(', ')||'to confirm')+'   |   Catalogue: '+(gv.catalog||'to confirm');
+  add({kind:'infra',x:colX.s,y:top+rows*rowH+30,w:Wd-80,h:110,title:'Infrastructure and platform',body:infra});
+  return {w:Wd,h:H,nodes:N,edges:E,title:'Solution design: '+(S.meta.client||'Client')+' - '+(S.meta.project||'Project')};}
+var SOLC={head:['#10263F','#10263F','#FFFFFF'],source:['#E6F0FB','#1F6FD1','#10263F'],bronze:['#F6E6D8','#A8622B','#10263F'],silver:['#E8EDF2','#6F7C8A','#10263F'],gold:['#F8EFCB','#A8820F','#10263F'],out:['#E3EEFC','#1F6FD1','#10263F'],infra:['#F3F8FE','#56708C','#10263F']};
+function xe(t){return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function solDrawio(){var m=solModel(),o='<mxfile host="app.diagrams.net"><diagram id="sd1" name="Solution design"><mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" page="1" pageWidth="'+m.w+'" pageHeight="'+m.h+'"><root><mxCell id="0"/><mxCell id="1" parent="0"/>';
+  m.nodes.forEach(function(n){var c=SOLC[n.kind],val=n.kind==='head'?'<b>'+xe(n.title)+'</b>':'<b>'+xe(n.title)+'</b><br>'+xe(n.body).replace(/\n/g,'<br>');
+    o+='<mxCell id="'+n.id+'" value="'+xe(val)+'" style="rounded=1;whiteSpace=wrap;html=1;fillColor='+c[0]+';strokeColor='+c[1]+';fontColor='+c[2]+';fontSize='+(n.kind==='head'?'14':'11')+';align=left;spacingLeft=8;verticalAlign=middle;'+(n.kind==='head'?'align=center;':'')+'" vertex="1" parent="1"><mxGeometry x="'+n.x+'" y="'+n.y+'" width="'+n.w+'" height="'+n.h+'" as="geometry"/></mxCell>';});
+  m.edges.forEach(function(e,i){o+='<mxCell id="e'+(i+1)+'" value="'+xe(e.label)+'" style="endArrow=block;html=1;rounded=0;strokeColor=#1F6FD1;'+(e.dash?'dashed=1;':'')+'" edge="1" parent="1" source="'+e.from+'" target="'+e.to+'"><mxGeometry relative="1" as="geometry"/></mxCell>';});
+  return o+'</root></mxGraphModel></diagram></mxfile>';}
+async function solVsdx(){
+  var m=solModel(),P=96,ns='http://schemas.microsoft.com/office/visio/2012/main',rn='http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  var vx=function(x){return (x/P).toFixed(4);},vy=function(y){return ((m.h-y)/P).toFixed(4);};
+  var cell=function(n,v,f){return '<Cell N="'+n+'" V="'+xe(v)+'"'+(f?' F="'+f+'"':'')+'/>';};
+  var shapes='',byId={},sid=0;
+  m.nodes.forEach(function(n){sid++;n.sid=sid;byId[n.id]=n;var c=SOLC[n.kind],w=n.w/P,h=n.h/P,t=n.kind==='head'?n.title:n.title+'\n'+n.body;
+    shapes+='<Shape ID="'+sid+'" Type="Shape" NameU="'+xe(n.id)+'">'+cell('PinX',vx(n.x+n.w/2))+cell('PinY',vy(n.y+n.h/2))+cell('Width',w.toFixed(4))+cell('Height',h.toFixed(4))+cell('LocPinX',(w/2).toFixed(4),'Width*0.5')+cell('LocPinY',(h/2).toFixed(4),'Height*0.5')+cell('FillForegnd',c[0])+cell('FillPattern','1')+cell('LeftMargin','0.08')+cell('RightMargin','0.08')+cell('LineColor',c[1])+cell('LineWeight','0.0104')+cell('VerticalAlign','1')+
+    '<Section N="Character"><Row IX="0">'+cell('Size',n.kind==='head'?'0.1667':'0.1111')+cell('Color',c[2])+'</Row></Section><Section N="Paragraph"><Row IX="0">'+cell('HorzAlign',n.kind==='head'?'1':'0')+'</Row></Section>'+
+    '<Section N="Geometry" IX="0">'+cell('NoFill','0')+cell('NoLine','0')+'<Row T="RelMoveTo" IX="1">'+cell('X','0')+cell('Y','0')+'</Row><Row T="RelLineTo" IX="2">'+cell('X','1')+cell('Y','0')+'</Row><Row T="RelLineTo" IX="3">'+cell('X','1')+cell('Y','1')+'</Row><Row T="RelLineTo" IX="4">'+cell('X','0')+cell('Y','1')+'</Row><Row T="RelLineTo" IX="5">'+cell('X','0')+cell('Y','0')+'</Row></Section>'+
+    '<Text>'+xe(t)+'</Text></Shape>';});
+  var conns='';
+  m.edges.forEach(function(e){sid++;var a=byId[e.from],b=byId[e.to];var bx=a.x+a.w,by=a.y+a.h/2,ex=b.x,ey=b.y+b.h/2;if(a===b)return;
+    var dx=(ex-bx)/P,dy=-(ey-by)/P,L=Math.sqrt(dx*dx+dy*dy),ang=Math.atan2(dy,dx);
+    shapes+='<Shape ID="'+sid+'" Type="Shape" NameU="Connector.'+sid+'">'+cell('PinX',vx(bx))+cell('PinY',vy(by))+cell('Width',L.toFixed(4))+cell('Height','0')+cell('Angle',ang.toFixed(5))+cell('LocPinX','0')+cell('LocPinY','0')+cell('BeginX',vx(bx))+cell('BeginY',vy(by))+cell('EndX',vx(ex))+cell('EndY',vy(ey))+cell('LineColor','#1F6FD1')+cell('LineWeight','0.0104')+cell('EndArrow','13')+(e.dash?cell('LinePattern','2'):'')+
+    '<Section N="Geometry" IX="0">'+cell('NoFill','1')+'<Row T="MoveTo" IX="1">'+cell('X','0')+cell('Y','0')+'</Row><Row T="LineTo" IX="2">'+cell('X',L.toFixed(4),'Width')+cell('Y','0')+'</Row></Section></Shape>';
+    conns+='<Connect FromSheet="'+sid+'" FromCell="BeginX" FromPart="9" ToSheet="'+a.sid+'" ToCell="PinX" ToPart="3"/><Connect FromSheet="'+sid+'" FromCell="EndX" FromPart="12" ToSheet="'+b.sid+'" ToCell="PinX" ToPart="3"/>';});
+  var hdr='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
+  var zip=new JSZip();
+  zip.file('[Content_Types].xml',hdr+'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/visio/document.xml" ContentType="application/vnd.ms-visio.drawing.main+xml"/><Override PartName="/visio/pages/pages.xml" ContentType="application/vnd.ms-visio.pages+xml"/><Override PartName="/visio/pages/page1.xml" ContentType="application/vnd.ms-visio.page+xml"/></Types>',{createFolders:false});
+  zip.file('_rels/.rels',hdr+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.microsoft.com/visio/2010/relationships/document" Target="visio/document.xml"/></Relationships>',{createFolders:false});
+  zip.file('visio/document.xml',hdr+'<VisioDocument xmlns="'+ns+'" xmlns:r="'+rn+'" xml:space="preserve"><DocumentSettings/><Colors/><FaceNames/><StyleSheets><StyleSheet ID="0" NameU="No Style" Name="No Style"><Cell N="EnableLineProps" V="1"/><Cell N="EnableFillProps" V="1"/><Cell N="EnableTextProps" V="1"/></StyleSheet></StyleSheets></VisioDocument>',{createFolders:false});
+  zip.file('visio/_rels/document.xml.rels',hdr+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.microsoft.com/visio/2010/relationships/pages" Target="pages/pages.xml"/></Relationships>',{createFolders:false});
+  zip.file('visio/pages/pages.xml',hdr+'<Pages xmlns="'+ns+'" xmlns:r="'+rn+'" xml:space="preserve"><Page ID="0" NameU="Solution design" Name="Solution design"><PageSheet><Cell N="PageWidth" V="'+(m.w/P).toFixed(4)+'"/><Cell N="PageHeight" V="'+(m.h/P).toFixed(4)+'"/></PageSheet><Rel r:id="rId1"/></Page></Pages>',{createFolders:false});
+  zip.file('visio/pages/_rels/pages.xml.rels',hdr+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.microsoft.com/visio/2010/relationships/page" Target="page1.xml"/></Relationships>',{createFolders:false});
+  zip.file('visio/pages/page1.xml',hdr+'<PageContents xmlns="'+ns+'" xmlns:r="'+rn+'" xml:space="preserve"><Shapes>'+shapes+'</Shapes><Connects>'+conns+'</Connects></PageContents>',{createFolders:false});
+  return zip.generateAsync({type:'blob',compression:'DEFLATE',mimeType:'application/vnd.ms-visio.drawing'});}
+async function downloadDesign(fmt){
+  var file=slug(S.meta.client||'client')+'-solution-design.'+(fmt==='drawio'?'drawio':'vsdx'),data;
+  try{
+    if(fmt==='drawio')data=new Blob([solDrawio()],{type:'application/xml'});
+    else{if(typeof JSZip==='undefined')throw new Error('The file library did not load.');data=await solVsdx();}
+    var dl=(typeof claude!=='undefined'&&claude.use)?await claude.use('downloads'):null;
+    if(!dl){var a=document.createElement('a');a.href=URL.createObjectURL(data);a.download=file;document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},1500);setMsg('Solution design downloaded as '+file+'.');return;}
+    await dl.save({filename:file,data:data});setMsg('Solution design offered as '+file+'.');
+  }catch(e){setMsg(e&&e.code==='declined'?'Download cancelled.':'Could not create the diagram: '+((e&&e.message)||'unknown error'));}}
 
 /* ---------- shell ---------- */
 var MODFN={overview:mOverview,brief:mBrief,current:mCurrent,sources:mSources,rationalise:mRationalise,medallion:mMedallion,c360:mC360,ingest:mIngest,govern:mGovern,api:mApi,ml:mMl,delivery:mDelivery,docs:mDocs};
@@ -1558,6 +1635,7 @@ document.addEventListener('click',function(e){var b=e.target.closest('[data-act]
   else if(a==='ml-preset'){var h2={};S.ml.cases.forEach(function(x){h2[x.name]=1;});ML_PRESETS.forEach(function(p){if(!h2[p.name]){var c=FACT.cases();c.name=p.name;c.type=p.type;c.decision=p.decision;c.target=p.target;c.dom=p.dom.slice();S.ml.cases.push(c);}});render();save();}
   else if(a==='gen-ep'){var ad=suggestEndpoints();ad.forEach(function(x){S.ingest.endpoints.push(x);});render();save();status(ad.length?ad.length+' endpoints added':'Nothing new to add');}
   else if(a==='doc'){downloadDoc(b.dataset.doc,b.dataset.fmt);}
+  else if(a==='design'){downloadDesign(b.dataset.fmt);}
   else if(a==='doc-prev'){UI.doc=b.dataset.doc;render();}
   else if(a==='menu'){toggleMenu();}
   else if(a==='new'){S=newState();UI.mod='brief';UI.src=0;S.meta.client='';closeMenu();render();save();}
